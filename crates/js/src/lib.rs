@@ -2,7 +2,7 @@ use heck::*;
 use std::collections::HashMap;
 use std::fmt::Write;
 use wit_bindgen_core::{
-    uwriteln, wit_parser, Files, InterfaceGenerator as _, Source, WorldGenerator,
+    uwrite, uwriteln, wit_parser, Files, InterfaceGenerator as _, Source, WorldGenerator,
 };
 use wit_parser::*;
 
@@ -40,6 +40,11 @@ impl WorldGenerator for Js {
 
         let world = &resolve.worlds[world];
 
+
+        uwriteln!(
+            self.src,
+            "// Fetch and compile the module"
+        );
         if self.opts.qjs {
             uwriteln!(
                 self.src,
@@ -55,26 +60,25 @@ impl WorldGenerator for Js {
                     file.close();
                     return binary;
                 }}
-
-                let module = new WebAssembly.Module(loadFile("{}.wasm"));
+                let wasm_module = new WebAssembly.Module(loadFile("{}.wasm"));
                 "#,
                 world.name
             );
         } else {
             uwriteln!(
                 self.src,
-                r#"let res = await fetch("{}.wasm");
-                let binary = await res.arrayBuffer();
-                let module = new WebAssembly.Module(binary);
+                r#"let wasm_binary_res = await fetch(new URL("./{}.wasm", import.meta.url));
+                let wasm_module_binary = await wasm_binary_res.arrayBuffer();
+                let wasm_module = new WebAssembly.Module(wasm_module_binary);
                 "#,
                 world.name
             );
         }
 
-        uwriteln!(
-            self.src,
-            "let instance = new WebAssembly.Instance(module);"
+        uwriteln!(self.src,
+            "// Construct the import object"
         );
+        uwriteln!(self.src, "let wasm_import_objects = {{}};");
     }
 
     fn import_interface(
@@ -84,34 +88,37 @@ impl WorldGenerator for Js {
         id: InterfaceId,
         _files: &mut Files,
     ) {
-        let name = resolve.name_world_key(name);
-        uwriteln!(
-            self.src,
-            "## <a name=\"{}\">Import interface {name}</a>\n",
-            name.to_snake_case()
+        let iface_name = resolve.name_world_key(name);
+        let iface = &resolve.interfaces[id];
+        let funcs = &iface.functions;
+        uwrite!(self.src, "import {{");
+        for (func_name, _func) in funcs {
+            uwrite!(self.src,
+                "{} as wasm_import_{}_{}, ",
+                func_name, iface_name, func_name
+            );
+        }
+        uwriteln!(self.src, r#"}} from "./{}.js";"#, iface_name);
+        uwriteln!(self.src,
+            r#"wasm_import_objects["{}"] = {{}};"#,
+            iface_name
         );
-        self.hrefs
-            .insert(name.to_string(), format!("#{}", name.to_snake_case()));
-        let mut gen = self.interface(resolve);
-        gen.docs(&resolve.interfaces[id].docs);
-        gen.push_str("\n");
-        gen.types(id);
-        gen.funcs(id);
+        for (func_name, _func) in funcs {
+            uwriteln!(self.src,
+                r#"wasm_import_objects["{}"]["{}"] = wasm_import_{}_{};"#,
+                iface_name, func_name, iface_name, func_name
+            );
+        }
     }
 
     fn import_funcs(
         &mut self,
-        resolve: &Resolve,
-        world: WorldId,
-        funcs: &[(&str, &Function)],
+        _resolve: &Resolve,
+        _world: WorldId,
+        _funcs: &[(&str, &Function)],
         _files: &mut Files,
     ) {
-        let name = &resolve.worlds[world].name;
-        uwriteln!(self.src, "## Imported functions to world `{name}`\n");
-        let mut gen = self.interface(resolve);
-        for (_, func) in funcs {
-            gen.func(func);
-        }
+        todo!("import_funcs() not implemented");
     }
 
     fn export_interface(
@@ -121,32 +128,70 @@ impl WorldGenerator for Js {
         id: InterfaceId,
         _files: &mut Files,
     ) {
-        let name = resolve.name_world_key(name);
-        uwriteln!(
-            self.src,
-            "## <a name=\"{}\">Export interface {name}</a>\n",
-            name.to_snake_case()
-        );
-        self.hrefs
-            .insert(name.to_string(), format!("#{}", name.to_snake_case()));
-        let mut gen = self.interface(resolve);
-        gen.types(id);
-        gen.funcs(id);
+        todo!("export_interface() not implemented");
     }
 
     fn export_funcs(
         &mut self,
-        resolve: &Resolve,
-        world: WorldId,
+        _resolve: &Resolve,
+        _world: WorldId,
         funcs: &[(&str, &Function)],
         _files: &mut Files,
     ) {
-        let name = &resolve.worlds[world].name;
-        uwriteln!(self.src, "## Exported functions from world `{name}`\n");
-        let mut gen = self.interface(resolve);
-        for (_, func) in funcs {
-            gen.func(func);
+        uwriteln!(
+            self.src,
+            r#"
+            // Instantiate the module
+            let wasm_instance = new WebAssembly.Instance(wasm_module, wasm_import_objects);
+
+            // Deal with export functions"#
+        );
+        for (name, func) in funcs {
+            // wether this function only aceept primary types as arguments and return only primary types
+            let mut is_primary_func = true;
+            fn is_primary_type(val_type: &Type) -> bool {
+                match val_type {
+                    Type::Bool | Type::Char |
+                    Type::Float32 | Type::Float64 |
+                    Type::S8 | Type::S16 | Type::S32 | Type::S64 |
+                    Type::U8 | Type::U16 | Type::U32 | Type::U64 => true,
+                    _ => false, 
+                }
+            }
+            for (_name, val_type) in &func.params {
+                if ! is_primary_type(val_type) {
+                    is_primary_func = false;
+                    break;
+                }
+            }
+            if is_primary_func {
+                match &func.results {
+                    Results::Anon(val_type) =>
+                        is_primary_func = is_primary_type(val_type),
+                    Results::Named(params) =>
+                    for (_name, val_type) in params {
+                        if ! is_primary_type(val_type) {
+                            is_primary_func = false;
+                            break;
+                        }
+                    }
+                }
+            }
+            if is_primary_func {
+                uwriteln!(
+                    self.src,
+                    r#"let wasm_export_{} =  wasm_instance.exports["{}"];"#,
+                    name, name
+                );
+            } else {
+                todo!("Wrapper for complex types not implemented");
+            }
         }
+        uwrite!(self.src, "export {{");
+        for (name, _func) in funcs {
+            uwrite!(self.src, "wasm_export_{} as {}, ", name, name);
+        }
+        uwriteln!(self.src, "}};");
     }
 
     fn export_types(
@@ -156,12 +201,7 @@ impl WorldGenerator for Js {
         types: &[(&str, TypeId)],
         _files: &mut Files,
     ) {
-        let name = &resolve.worlds[world].name;
-        uwriteln!(self.src, "## Exported types from world `{name}`\n");
-        let mut gen = self.interface(resolve);
-        for (name, ty) in types {
-            gen.define_type(name, *ty);
-        }
+        todo!("export_types() not implemented");
     }
 
     fn finish(&mut self, resolve: &Resolve, world: WorldId, files: &mut Files) {

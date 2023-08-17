@@ -55,6 +55,14 @@ enum Opt {
         #[clap(flatten)]
         args: Common,
     },
+    /// Generates JavaScript bindings for core modules using component ABI.
+    #[cfg(feature = "js")]
+    Js {
+        #[clap(flatten)]
+        opts: wit_bindgen_js::Opts,
+        #[clap(flatten)]
+        args: Common,
+    },
 }
 
 #[derive(Debug, Parser)]
@@ -93,6 +101,8 @@ fn main() -> Result<()> {
         Opt::TeavmJava { opts, args } => (opts.build(), args),
         #[cfg(feature = "go")]
         Opt::TinyGo { opts, args } => (opts.build(), args),
+        #[cfg(feature = "js")]
+        Opt::Js { opts, args } => (opts.build(), args),
     };
 
     gen_world(generator, &opt, &mut files)?;

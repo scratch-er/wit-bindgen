@@ -1,0 +1,22 @@
+[package]
+name = "wit-bindgen-js"
+version = "0.0.0"
+edition.workspace = true
+repository = 'https://github.com/scratch-er/wit-bindgen'
+license = "Apache-2.0 WITH LLVM-exception"
+homepage = 'https://github.com/scratch-er/wit-bindgen'
+description = """
+JavaScript bindings generator from WIT for core wasm modules with component model ABI,  used
+as a transitional toolkit when component model isn't supported by most wasm runtimes.
+"""
+
+[lib]
+doctest = false
+test = false
+
+[dependencies]
+heck = { workspace = true }
+pulldown-cmark = { workspace = true }
+clap = { workspace = true, optional = true }
+wit-bindgen-core = { workspace = true }
+wit-component = { workspace = true }

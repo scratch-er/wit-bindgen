@@ -1881,6 +1881,7 @@ dependencies = [
  "wit-bindgen-c",
  "wit-bindgen-core",
  "wit-bindgen-go",
+ "wit-bindgen-js",
  "wit-bindgen-markdown",
  "wit-bindgen-rust",
  "wit-bindgen-teavm-java",
@@ -1905,6 +1906,17 @@ dependencies = [
  "heck",
  "test-helpers",
  "wit-bindgen-c",
+ "wit-bindgen-core",
+ "wit-component",
+]
+
+[[package]]
+name = "wit-bindgen-js"
+version = "0.0.0"
+dependencies = [
+ "clap",
+ "heck",
+ "pulldown-cmark 0.9.3",
  "wit-bindgen-core",
  "wit-component",
 ]

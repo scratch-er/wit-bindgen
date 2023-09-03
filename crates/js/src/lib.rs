@@ -51,25 +51,25 @@ impl WorldGenerator for Js {
                 r#"import * as std from "std"
 
                 function loadFile(filename) {{
-                    let file = std.open(filename, "rb")
+                    const file = std.open(filename, "rb")
                     file.seek(0, std.SEEK_END)
-                    let file_size = file.tell()
+                    const file_size = file.tell()
                     file.seek(0, std.SEEK_SET)
-                    let binary = new ArrayBuffer(file_size);
+                    const binary = new ArrayBuffer(file_size);
                     file.read(binary, 0, file_size)
                     file.close();
                     return binary;
                 }}
-                let wasm_module = new WebAssembly.Module(loadFile("{}.wasm"));
+                const wasm_module = new WebAssembly.Module(loadFile("{}.wasm"));
                 "#,
                 world.name
             );
         } else {
             uwriteln!(
                 self.src,
-                r#"let wasm_binary_res = await fetch(new URL("./{}.wasm", import.meta.url));
-                let wasm_module_binary = await wasm_binary_res.arrayBuffer();
-                let wasm_module = new WebAssembly.Module(wasm_module_binary);
+                r#"const wasm_binary_res = await fetch(new URL("./{}.wasm", import.meta.url));
+                const wasm_module_binary = await wasm_binary_res.arrayBuffer();
+                const wasm_module = new WebAssembly.Module(wasm_module_binary);
                 "#,
                 world.name
             );
@@ -144,20 +144,112 @@ impl WorldGenerator for Js {
             // Instantiate the module
             let wasm_instance = new WebAssembly.Instance(wasm_module, wasm_import_objects);
 
-            // Deal with export functions"#
+            // Deal with exports"#
         );
-        for (name, func) in funcs {
-            // wether this function only aceept primary types as arguments and return only primary types
-            let mut is_primary_func = true;
-            fn is_primary_type(val_type: &Type) -> bool {
+        fn is_primary_type(val_type: &Type) -> bool {
+            match val_type {
+                Type::Bool | Type::Char |
+                Type::Float32 | Type::Float64 |
+                Type::S8 | Type::S16 | Type::S32 | Type::S64 |
+                Type::U8 | Type::U16 | Type::U32 | Type::U64 => true,
+                _ => false, 
+            }
+        }
+
+        // If there is any function that accepts or returns a string
+        // additional code need to be generated for JS string encoding and decoding
+        let mut exist_string_as_param = false;
+        let mut exist_string_as_result = false;
+        for (_name, func) in funcs {
+            for (_name, val_type) in &func.params {
                 match val_type {
-                    Type::Bool | Type::Char |
-                    Type::Float32 | Type::Float64 |
-                    Type::S8 | Type::S16 | Type::S32 | Type::S64 |
-                    Type::U8 | Type::U16 | Type::U32 | Type::U64 => true,
-                    _ => false, 
+                    Type::String => {
+                        exist_string_as_param = true;
+                    },
+                    _ => (),
                 }
             }
+            match &func.results {
+                Results::Anon(val_type) =>
+                    match val_type {
+                        Type::String => {
+                            exist_string_as_result = true;
+                        },
+                        _ => (),
+                    },
+                Results::Named(params) =>
+                    for (_name, val_type) in params {
+                        match val_type {
+                            Type::String => {
+                                exist_string_as_result = true;
+                            },
+                            _ => (),
+                        }
+                    },
+            }
+            if exist_string_as_param || exist_string_as_result {
+                break;
+            }
+        }
+        if exist_string_as_param || exist_string_as_result {
+            uwriteln!(
+                self.src,
+                "const wasm_export_memory = wasm_instance.exports.memory;"
+            );
+        }
+        if exist_string_as_param {
+            uwriteln!(
+                self.src,
+                r#"const wasm_export_realloc = wasm_instance.exports.cabi_realloc;
+                const wasm_wrapper_text_encoder = new TextEncoder();"#
+            );
+        }
+        if exist_string_as_result {
+            uwriteln!(
+                self.src,
+                "const wasm_wrapper_text_decoder = new TextDecoder();"
+            );
+        }
+        if exist_string_as_param {
+            uwriteln!(
+                self.src,
+                r#"
+                // encode a string into UTF-8 and store it into the WASM linear memory
+                function wasm_wrapper_encode_str(str) {{
+                    if (typeof str !== "string") {{
+                        throw new TypeError('expected a string');
+                    }}
+                    if (str.length == 0) {{
+                        return {{ptr:1, len:0}};
+                    }}
+                    // encode the string into UTF-8
+                    let encoded = wasm_wrapper_text_encoder.encode(str);
+                    let len = encoded.length;
+                    // allocate memory in the WASM linear memory for the string
+                    let ptr = wasm_export_realloc(0, 0, 1, len);
+                    // copy encoded string
+                    let view = new Uint8Array(wasm_export_memory.buffer, ptr, len);
+                    view.set(encoded);
+                    return {{ptr, len}};
+                }}"#
+            );
+        }
+        if exist_string_as_result {
+            uwriteln!(
+                self.src,
+                r#"
+                function wasm_wrapper_decode_str(ptr, len) {{
+                    let view = new Uint8Array(wasm_export_memory.buffer, ptr, len);
+                    return wasm_wrapper_text_decoder.decode(view);
+                }}
+                "#
+            );
+        }
+
+
+        for (func_name, func) in funcs {
+            // wether this function only aceept primary types as arguments and return only primary types
+            let mut is_primary_func = true;
             for (_name, val_type) in &func.params {
                 if ! is_primary_type(val_type) {
                     is_primary_func = false;
@@ -169,24 +261,94 @@ impl WorldGenerator for Js {
                     Results::Anon(val_type) =>
                         is_primary_func = is_primary_type(val_type),
                     Results::Named(params) =>
-                    for (_name, val_type) in params {
-                        if ! is_primary_type(val_type) {
-                            is_primary_func = false;
-                            break;
+                        for (_name, val_type) in params {
+                            if ! is_primary_type(val_type) {
+                                is_primary_func = false;
+                                break;
+                            }
                         }
-                    }
                 }
             }
+
             if is_primary_func {
                 uwriteln!(
                     self.src,
                     r#"let wasm_export_{} =  wasm_instance.exports["{}"];"#,
-                    name, name
+                    func_name, func_name
                 );
             } else {
-                todo!("Wrapper for complex types not implemented");
+                uwrite!(self.src, "function wasm_export_{}(", func_name);
+                for (param_name, _param_type) in &func.params {
+                    uwrite!(self.src, "{}, ", param_name);
+                }
+                uwriteln!(self.src, ") {{");
+                let mut arg_cnt = 0;
+                for (param_name, param_type) in &func.params {
+                    match param_type {
+                        Type::String => {
+                            uwriteln!(self.src, "let {}_encoded = wasm_wrapper_encode_str({});", param_name, param_name);
+                            uwriteln!(self.src, "let arg{} = {}_encoded.ptr;", arg_cnt, param_name);
+                            uwriteln!(self.src, "let arg{} = {}_encoded.len;", arg_cnt+1, param_name);
+                            arg_cnt += 2;
+                        },
+                        Type::Id(_) => {
+                            todo!("wrappaer for recursive types not implemented");
+                        },
+                        _ => {
+                            uwriteln!(self.src, "let arg{} = {};", arg_cnt, param_name);
+                            arg_cnt += 1;
+                        }
+                    }
+                }
+
+                uwriteln!(self.src, "");
+                uwrite!(self.src, r#"let wasm_func_result = wasm_instance.exports["{}"]("#, func_name);
+                for i in 0..arg_cnt {
+                    uwrite!(self.src, "arg{}, ", i);
+                }
+                uwriteln!(self.src, ");");
+                uwriteln!(self.src, "");
+                // TODO: decode string
+                // TODO: return result
+                match func.results {
+                    Results::Anon(result_type) => {
+                        match result_type {
+                            Type::Id(_) => {
+                                todo!("multiple returning recursive types not implemented");
+                            },
+                            Type::String => {
+                                uwriteln!(
+                                    self.src,
+                                    r#"// encode the string
+                                    let wasm_func_result_ptr = new DataView(wasm_export_memory.buffer).getInt32(wasm_func_result, true);
+                                    let wasm_func_result_len = new DataView(wasm_export_memory.buffer).getInt32(wasm_func_result+4, true);
+                                    wasm_func_result = wasm_wrapper_decode_str(wasm_func_result_ptr, wasm_func_result_len);
+                                    "#
+                                );
+                            },
+                            _ => ()
+                        }
+                    },
+                    Results::Named(_) => {
+                        todo!("multiple return values with recursive types not implemented");
+                    },
+                }
+
+                uwriteln!(
+                    self.src,
+                    r#"let post_return = wasm_instance.exports["cabi_post_{}"];
+                    if (post_return) {{
+                        post_return();
+                    }}
+
+                    return wasm_func_result;"#,
+                    func_name
+                );
+                uwriteln!(self.src, "}}");
             }
         }
+
+        uwriteln!(self.src, "");
         uwrite!(self.src, "export {{");
         for (name, _func) in funcs {
             uwrite!(self.src, "wasm_export_{} as {}, ", name, name);

@@ -320,9 +320,9 @@ impl WorldGenerator for Js {
                                 uwriteln!(
                                     self.src,
                                     r#"// encode the string
-                                    let wasm_func_result_ptr = new DataView(wasm_export_memory.buffer).getInt32(wasm_func_result, true);
-                                    let wasm_func_result_len = new DataView(wasm_export_memory.buffer).getInt32(wasm_func_result+4, true);
-                                    wasm_func_result = wasm_wrapper_decode_str(wasm_func_result_ptr, wasm_func_result_len);
+                                    const wasm_func_result_ptr = new DataView(wasm_export_memory.buffer).getInt32(wasm_func_result, true);
+                                    const wasm_func_result_len = new DataView(wasm_export_memory.buffer).getInt32(wasm_func_result+4, true);
+                                    const js_func_result = wasm_wrapper_decode_str(wasm_func_result_ptr, wasm_func_result_len);
                                     "#
                                 );
                             },
@@ -338,13 +338,13 @@ impl WorldGenerator for Js {
                     self.src,
                     r#"let post_return = wasm_instance.exports["cabi_post_{}"];
                     if (post_return) {{
-                        post_return();
+                        post_return(wasm_func_result);
                     }}
 
-                    return wasm_func_result;"#,
+                    return js_func_result;"#,
                     func_name
                 );
-                uwriteln!(self.src, "}}");
+                uwriteln!(self.src, "}}\n");
             }
         }
 

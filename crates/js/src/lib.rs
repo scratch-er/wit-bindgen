@@ -1,8 +1,10 @@
+mod type_expanding;
+
 use heck::*;
 use std::collections::HashMap;
 use std::fmt::Write;
 use wit_bindgen_core::{
-    uwrite, uwriteln, wit_parser, Files, InterfaceGenerator as _, Source, WorldGenerator,
+    uwrite, uwriteln, wit_parser, Files, Source, WorldGenerator,
 };
 use wit_parser::*;
 
@@ -10,7 +12,6 @@ use wit_parser::*;
 struct Js {
     src: Source,
     opts: Opts,
-    hrefs: HashMap<String, String>,
     sizes: SizeAlign,
 }
 
@@ -24,6 +25,13 @@ pub struct Opts {
     /// instead of `fetch`, which is incomplete in QuickJS.
     #[cfg_attr(feature = "clap", arg(long))]
     qjs: bool,
+    /// Generate code for node.js
+    ///
+    /// If this option is enabled, the generated JS module will use
+    /// the `fs` module of node.js to load wasm file from filesystem
+    /// instead of `fetch`.
+    #[cfg_attr(feature = "clap", arg(long))]
+    node: bool,
 }
 
 impl Opts {
@@ -45,7 +53,19 @@ impl WorldGenerator for Js {
             self.src,
             "// Fetch and compile the module"
         );
-        if self.opts.qjs {
+
+        if self.opts.qjs && self.opts.node {
+            panic!("--node conflicts with --qjs");
+        } else if self.opts.node {
+            uwriteln!(
+                self.src,
+                r#"const node_module_fs = await import("fs");
+                const wasm_module_binary = await node_module_fs.readFileSync("./{}.wasm");
+                const wasm_module = new WebAssembly.Module(wasm_module_binary);
+                "#,
+                world.name
+            );
+        } else if self.opts.qjs {
             uwriteln!(
                 self.src,
                 r#"import * as std from "std"

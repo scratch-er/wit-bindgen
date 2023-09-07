@@ -115,7 +115,9 @@ impl WorldGenerator for Js {
         for (func_name, _func) in funcs {
             uwrite!(self.src,
                 "{} as wasm_import_{}_{}, ",
-                func_name.to_lower_camel_case(), iface_name.to_lower_camel_case(), func_name.to_lower_camel_case()
+                func_name.to_lower_camel_case(),
+                iface_name.to_lower_camel_case(),
+                func_name.to_lower_camel_case()
             );
         }
         uwriteln!(self.src, r#"}} from "./{}.js";"#, iface_name);
@@ -126,7 +128,8 @@ impl WorldGenerator for Js {
         for (func_name, _func) in funcs {
             uwriteln!(self.src,
                 r#"wasm_import_objects["{}"]["{}"] = wasm_import_{}_{};"#,
-                iface_name, func_name, iface_name.to_lower_camel_case(), func_name.to_lower_camel_case()
+                iface_name, func_name, iface_name.to_lower_camel_case(),
+                func_name.to_lower_camel_case()
             );
         }
     }
@@ -135,10 +138,29 @@ impl WorldGenerator for Js {
         &mut self,
         _resolve: &Resolve,
         _world: WorldId,
-        _funcs: &[(&str, &Function)],
+        funcs: &[(&str, &Function)],
         _files: &mut Files,
     ) {
-        todo!("import_funcs() not implemented");
+        uwriteln!(self.src, "\n// import functions");
+        uwrite!(self.src, "import {{");
+        for (func_name, _func) in funcs {
+            uwrite!(
+                self.src,
+                "{} as wasm_import_root_function_{}, ",
+                func_name.to_lower_camel_case(),
+                func_name.to_lower_camel_case()
+            );
+        }
+        uwriteln!(self.src, r#"}} from "./root.js""#);
+
+        uwriteln!(self.src, r#"wasm_import_objects["$root"] = {{}};"#);
+        for (func_name, _func) in funcs {
+            uwriteln!(self.src,
+                r#"wasm_import_objects["$root"]["{}"] = wasm_import_root_function_{};"#,
+                func_name,
+                func_name.to_lower_camel_case()
+            );
+        }
     }
 
     fn export_interface(
@@ -383,7 +405,7 @@ impl WorldGenerator for Js {
         types: &[(&str, TypeId)],
         _files: &mut Files,
     ) {
-        todo!("export_types() not implemented");
+        println!("warning: export types are ignored when generating JS bindings.")
     }
 
     fn finish(&mut self, resolve: &Resolve, world: WorldId, files: &mut Files) {

@@ -115,7 +115,7 @@ impl WorldGenerator for Js {
         for (func_name, _func) in funcs {
             uwrite!(self.src,
                 "{} as wasm_import_{}_{}, ",
-                func_name, iface_name, func_name
+                func_name.to_lower_camel_case(), iface_name.to_lower_camel_case(), func_name.to_lower_camel_case()
             );
         }
         uwriteln!(self.src, r#"}} from "./{}.js";"#, iface_name);
@@ -126,7 +126,7 @@ impl WorldGenerator for Js {
         for (func_name, _func) in funcs {
             uwriteln!(self.src,
                 r#"wasm_import_objects["{}"]["{}"] = wasm_import_{}_{};"#,
-                iface_name, func_name, iface_name, func_name
+                iface_name, func_name, iface_name.to_lower_camel_case(), func_name.to_lower_camel_case()
             );
         }
     }
@@ -293,11 +293,11 @@ impl WorldGenerator for Js {
             if is_primary_func {
                 uwriteln!(
                     self.src,
-                    r#"let wasm_export_{} =  wasm_instance.exports["{}"];"#,
-                    func_name, func_name
+                    r#"let wasm_export_{} = wasm_instance.exports["{}"];"#,
+                    func_name.to_lower_camel_case(), func_name
                 );
             } else {
-                uwrite!(self.src, "function wasm_export_{}(", func_name);
+                uwrite!(self.src, "function wasm_export_{}(", func_name.to_lower_camel_case());
                 for (param_name, _param_type) in &func.params {
                     uwrite!(self.src, "{}, ", param_name);
                 }
@@ -371,7 +371,7 @@ impl WorldGenerator for Js {
         uwriteln!(self.src, "");
         uwrite!(self.src, "export {{");
         for (name, _func) in funcs {
-            uwrite!(self.src, "wasm_export_{} as {}, ", name, name);
+            uwrite!(self.src, "wasm_export_{} as {}, ", name.to_lower_camel_case(), name.to_lower_camel_case());
         }
         uwriteln!(self.src, "}};");
     }

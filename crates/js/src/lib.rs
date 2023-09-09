@@ -1,4 +1,4 @@
-mod type_expanding;
+mod js_wrapper;
 
 use heck::*;
 use std::collections::HashMap;
@@ -7,6 +7,7 @@ use wit_bindgen_core::{
     uwrite, uwriteln, wit_parser, Files, Source, WorldGenerator,
 };
 use wit_parser::*;
+use js_wrapper::*;
 
 #[derive(Default)]
 struct Js {
